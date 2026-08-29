@@ -1,0 +1,12 @@
+{
+  "name": "discord-channel-cleaner",
+  "version": "1.0.0",
+  "description": "Discord channel name bulk cleaner",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1"
+  }
+}
