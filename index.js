@@ -1,4 +1,3 @@
-cat > index.js <<'EOF'
 require("dotenv").config();
 
 const {
@@ -20,14 +19,12 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
 if (!TOKEN || !CLIENT_ID) {
-    console.error("DISCORD_TOKEN または CLIENT_ID が設定されていません。");
+    console.error("DISCORD_TOKEN / CLIENT_ID が設定されていません。");
     process.exit(1);
 }
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds
-    ]
+    intents: [GatewayIntentBits.Guilds]
 });
 
 /* =========================
@@ -38,7 +35,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName("delete-name")
-        .setDescription("指定した文字列を含むチャンネルを一括削除")
+        .setDescription("指定した文字列を含むテキストチャンネルを一括削除")
         .addStringOption(option =>
             option
                 .setName("keyword")
@@ -48,65 +45,105 @@ const commands = [
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.ManageChannels.toString()
-        ),
+        )
+        .toJSON(),
 
     new SlashCommandBuilder()
         .setName("delete-roles")
-        .setDescription("Botより下にあるロールを一括削除")
+        .setDescription("Botより下にある荒らし用ロールを一括削除")
         .setDefaultMemberPermissions(
             PermissionFlagsBits.ManageRoles.toString()
         )
+        .toJSON()
 
-].map(command => command.toJSON());
-
-/* =========================
-   スラッシュコマンド登録
-   複数Server対応なのでGuild IDを使わない
-========================= */
-
-const rest = new REST({ version: "10" }).setToken(TOKEN);
-
-async function registerCommands() {
-
-    try {
-
-        console.log("スラッシュコマンドを登録中...");
-
-        await rest.put(
-            Routes.applicationCommands(CLIENT_ID),
-            {
-                body: commands
-            }
-        );
-
-        console.log("スラッシュコマンド登録完了");
-
-    } catch (error) {
-
-        console.error("コマンド登録エラー:", error);
-
-    }
-}
+];
 
 /* =========================
-   Bot起動
+   ログイン
 ========================= */
 
 client.once(Events.ClientReady, async () => {
 
     console.log(`ログイン完了 : ${client.user.tag}`);
+    console.log(`Bot ID : ${client.user.id}`);
     console.log(`参加Server数 : ${client.guilds.cache.size}`);
 
-    for (const guild of client.guilds.cache.values()) {
-        console.log(`Server : ${guild.name} (${guild.id})`);
-    }
+    /*
+     * 複数Server対応
+     * グローバル登録ではなく、Botが現在参加している
+     * 全Serverへコマンドを登録する
+     */
 
-    await registerCommands();
+    const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+    for (const [guildId, guild] of client.guilds.cache) {
+
+        try {
+
+            await rest.put(
+                Routes.applicationGuildCommands(
+                    CLIENT_ID,
+                    guildId
+                ),
+                {
+                    body: commands
+                }
+            );
+
+            console.log(
+                `コマンド登録完了 : ${guild.name} (${guildId})`
+            );
+
+        } catch (error) {
+
+            console.error(
+                `コマンド登録失敗 : ${guild.name}`,
+                error.message
+            );
+
+        }
+
+    }
 
 });
 
 /* =========================
-   コマンド処理
+   新しいServerへ参加した時
+========================= */
+
+client.on(Events.GuildCreate, async guild => {
+
+    try {
+
+        const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+        await rest.put(
+            Routes.applicationGuildCommands(
+                CLIENT_ID,
+                guild.id
+            ),
+            {
+                body: commands
+            }
+        );
+
+        console.log(
+            `新規Serverへコマンド登録 : ${guild.name}`
+        );
+
+    } catch (error) {
+
+        console.error(
+            "新規Server コマンド登録失敗 :",
+            error.message
+        );
+
+    }
+
+});
+
+/* =========================
+   スラッシュコマンド
 ========================= */
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -122,21 +159,28 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.commandName === "delete-name") {
 
         if (!interaction.guild) {
+
             return interaction.reply({
-                content: "❌ Server内で実行してください。"
+                content: "❌ Server内で実行してください。",
+                ephemeral: true
             });
+
         }
 
         if (!interaction.memberPermissions?.has(
             PermissionFlagsBits.ManageChannels
         )) {
+
             return interaction.reply({
-                content: "❌ 「チャンネルの管理」権限が必要です。"
+                content: "❌ 「チャンネルの管理」権限が必要です。",
+                ephemeral: true
             });
+
         }
 
         const keyword =
-            interaction.options.getString("keyword", true)
+            interaction.options
+                .getString("keyword", true)
                 .toLowerCase();
 
         const guild = interaction.guild;
@@ -154,7 +198,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
             return interaction.reply({
                 content:
-                    `🔎 「${keyword}」を含むチャンネルはありません。`
+                    `🔎 「${keyword}」を含むチャンネルはありません。`,
+                ephemeral: true
             });
 
         }
@@ -226,31 +271,61 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.commandName === "delete-roles") {
 
         if (!interaction.guild) {
+
             return interaction.reply({
-                content: "❌ Server内で実行してください。"
+                content: "❌ Server内で実行してください。",
+                ephemeral: true
             });
+
         }
 
         if (!interaction.memberPermissions?.has(
             PermissionFlagsBits.ManageRoles
         )) {
+
             return interaction.reply({
-                content: "❌ 「ロールの管理」権限が必要です。"
+                content: "❌ 「ロールの管理」権限が必要です。",
+                ephemeral: true
             });
+
         }
 
         const guild = interaction.guild;
 
-        const me = guild.members.me;
+        /*
+         * Bot自身のMember情報を確実に取得
+         */
 
-        if (!me) {
+        let me;
+
+        try {
+
+            me = await guild.members.fetchMe();
+
+        } catch (error) {
+
+            console.error(
+                "Bot Member取得失敗 :",
+                error.message
+            );
+
             return interaction.reply({
                 content:
-                    "❌ Bot自身のメンバー情報を取得できませんでした。"
+                    "❌ Bot自身のメンバー情報を取得できませんでした。",
+                ephemeral: true
             });
+
         }
 
         const botHighestRole = me.roles.highest;
+
+        /*
+         * Botより下
+         * 管理ロールではない
+         * @everyoneではない
+         *
+         * ロールだけを対象にする
+         */
 
         const targets = guild.roles.cache.filter(role => {
 
@@ -266,7 +341,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
             return interaction.reply({
                 content:
-                    "ℹ️ Botより下に削除可能なロールがありません。"
+                    "ℹ️ Botより下に削除可能なロールがありません。",
+                ephemeral: true
             });
 
         }
@@ -295,7 +371,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 inline: true
             })
             .setFooter({
-                text: "管理ロール・統合ロールは削除されません"
+                text:
+                    "管理ロール・統合ロール・Botより上のロールは削除されません"
             });
 
         const row = new ActionRowBuilder()
@@ -387,7 +464,8 @@ client.on(Events.InteractionCreate, async interaction => {
         if (!interaction.guild) {
 
             return interaction.update({
-                content: "❌ Serverを取得できませんでした。",
+                content:
+                    "❌ Serverを取得できませんでした。",
                 embeds: [],
                 components: []
             });
@@ -461,6 +539,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
         }
 
+        /*
+         * ここで即座にDiscordへ応答
+         * 「アプリケーションが応答しない」を防ぐ
+         */
+
         await interaction.update({
             content:
                 `🗑️ ${targets.size}個のチャンネルを削除しています……`,
@@ -476,13 +559,13 @@ client.on(Events.InteractionCreate, async interaction => {
             try {
 
                 await channel.delete(
-                    `一括削除: "${keyword}" / 実行者: ${interaction.user.tag}`
+                    `一括削除 : "${keyword}" / 実行者 : ${interaction.user.tag}`
                 );
 
                 success++;
 
                 await new Promise(resolve =>
-                    setTimeout(resolve, 500)
+                    setTimeout(resolve, 350)
                 );
 
             } catch (error) {
@@ -490,7 +573,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 failed++;
 
                 console.error(
-                    `チャンネル削除失敗: ${channel.name}`,
+                    `チャンネル削除失敗 : ${channel.name}`,
                     error.message
                 );
 
@@ -498,11 +581,16 @@ client.on(Events.InteractionCreate, async interaction => {
 
         }
 
+        /*
+         * 実行者だけではなく
+         * Server全員に見える結果メッセージ
+         */
+
         return interaction.followUp({
             content:
-                `✅ 一括削除完了\n\n` +
-                `🗑️ 削除: **${success}**\n` +
-                `❌ 失敗: **${failed}**`
+                `✅ **チャンネル一括削除完了**\n\n` +
+                `🗑️ 削除 : **${success}**\n` +
+                `❌ 失敗 : **${failed}**`
         });
 
     }
@@ -555,11 +643,10 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (!interaction.guild) {
 
-            return interaction.update({
+            return interaction.reply({
                 content:
-                    "❌ Serverを取得できませんでした。",
-                embeds: [],
-                components: []
+                    "❌ Server内で実行してください。",
+                ephemeral: true
             });
 
         }
@@ -568,24 +655,40 @@ client.on(Events.InteractionCreate, async interaction => {
             PermissionFlagsBits.ManageRoles
         )) {
 
-            return interaction.update({
+            return interaction.reply({
                 content:
                     "❌ ロール管理権限がありません。",
-                embeds: [],
-                components: []
+                ephemeral: true
             });
 
         }
 
+        /*
+         * 最初に即応答
+         * ロール取得や削除に時間がかかっても
+         * 「アプリケーションが応答しない」にならない
+         */
+
+        await interaction.deferUpdate();
+
         const guild = interaction.guild;
 
-        const me = guild.members.me;
+        let me;
 
-        if (!me) {
+        try {
 
-            return interaction.update({
+            me = await guild.members.fetchMe();
+
+        } catch (error) {
+
+            console.error(
+                "Bot Member取得失敗 :",
+                error.message
+            );
+
+            return interaction.editReply({
                 content:
-                    "❌ Bot自身の情報を取得できませんでした。",
+                    "❌ Bot自身のメンバー情報を取得できませんでした。",
                 embeds: [],
                 components: []
             });
@@ -593,6 +696,15 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         const botHighestRole = me.roles.highest;
+
+        /*
+         * 荒らしが作った通常ロールを対象
+         *
+         * @everyone       → 除外
+         * Bot管理ロール   → 除外
+         * 統合ロール      → 除外
+         * Bot以上のロール → 除外
+         */
 
         const targets = guild.roles.cache.filter(role => {
 
@@ -606,7 +718,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (targets.size === 0) {
 
-            return interaction.update({
+            return interaction.editReply({
                 content:
                     "ℹ️ 削除できるロールがありません。",
                 embeds: [],
@@ -615,7 +727,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
         }
 
-        await interaction.update({
+        await interaction.editReply({
             content:
                 `🗑️ ${targets.size}個のロールを削除しています……`,
             embeds: [],
@@ -630,7 +742,7 @@ client.on(Events.InteractionCreate, async interaction => {
             try {
 
                 await role.delete(
-                    `荒らし対策によるロール一括削除 / 実行者: ${interaction.user.tag}`
+                    `荒らし対策によるロール一括削除 / 実行者 : ${interaction.user.tag}`
                 );
 
                 success++;
@@ -644,7 +756,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 failed++;
 
                 console.error(
-                    `ロール削除失敗: ${role.name}`,
+                    `ロール削除失敗 : ${role.name}`,
                     error.message
                 );
 
@@ -652,11 +764,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
         }
 
+        /*
+         * Server全員に見える完了メッセージ
+         */
+
         return interaction.followUp({
             content:
-                `✅ ロール削除完了\n\n` +
-                `🗑️ 削除: **${success}**\n` +
-                `❌ 失敗: **${failed}**`
+                `✅ **ロール削除完了**\n\n` +
+                `🗑️ 削除 : **${success}**\n` +
+                `❌ 失敗 : **${failed}**`
         });
 
     }
@@ -668,15 +784,30 @@ client.on(Events.InteractionCreate, async interaction => {
 ========================= */
 
 client.on(Events.Error, error => {
-    console.error("Discord Client Error:", error);
+
+    console.error(
+        "Discord Client Error:",
+        error
+    );
+
 });
 
 process.on("unhandledRejection", error => {
-    console.error("Unhandled Rejection:", error);
+
+    console.error(
+        "Unhandled Rejection:",
+        error
+    );
+
 });
 
 process.on("uncaughtException", error => {
-    console.error("Uncaught Exception:", error);
+
+    console.error(
+        "Uncaught Exception:",
+        error
+    );
+
 });
 
 /* =========================
@@ -685,3 +816,15 @@ process.on("uncaughtException", error => {
 
 client.login(TOKEN);
 EOF
+
+# 必要パッケージ確認・不足ならインストール
+npm install discord.js dotenv
+
+# 構文チェック
+node --check index.js
+
+# Botだけ再起動
+pm2 restart cleaner-discord-bot
+
+# 状態確認
+pm2 status cleaner-discord-bot
